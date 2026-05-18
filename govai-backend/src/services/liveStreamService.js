@@ -1,179 +1,253 @@
 // src/services/liveStreamService.js
-const fs   = require('fs');
-const path = require('path');
-const os   = require('os');
+// Receives audio chunks → Whisper transcription → verification-aware
+// Ollama agent prompt pipeline → emits results back to frontend.
+
+const fs       = require('fs');
+const path     = require('path');
+const os       = require('os');
 const { v4: uuidv4 } = require('uuid');
-const axios          = require('axios');
-const FormData       = require('form-data'); // npm i form-data — avoids Node Blob/FormData compat issues
-const config         = require('../config');
-const logger         = require('../utils/logger');
-const { analyzeTranscript }   = require('./ollamaService');
-const { evaluateGovernance }  = require('./governanceService');
+const axios    = require('axios');
+const FormData = require('form-data');
+const config   = require('../config');
+const logger   = require('../utils/logger');
+const Order    = require('../models/Order');
+const CallLog  = require('../models/CallLog');
+const { evaluateGovernance }                         = require('./governanceService');
+const { runAgentPromptPipeline, VERIFICATION_STAGE } = require('./agentPromptService');
 
-const ffmpegStatic = require('ffmpeg-static');
-const util = require('util');
-const { exec } = require('child_process');
-const execPromise = util.promisify(exec);
-
-// ─── In-memory store for active live calls ────────────────────────────────────
+// ─── In-memory call state ─────────────────────────────────────────────────────
 const activeCalls = new Map();
 
-// ─── Mock sentences (used when config.useMockAws = true) ─────────────────────
 const MOCK_SENTENCES = [
-  'Hello, I am calling about my recent order.',
-  'I am very upset because it has not arrived.',
-  'Your delivery service is absolutely terrible.',
-  'I want to cancel the order and get a full refund right now.',
-  'This is unacceptable and I demand to speak to a manager.',
+  "Hello, I need help with my order.",
+  "My name is Sarah Mitchell and my order number is ORD-2024-01001.",
+  "I am very upset — the delivery hasn't arrived and I want a refund.",
+  "This is unacceptable. I want to speak to a manager.",
+  "Can you check the status of my delivery please?",
 ];
 
-// ─── Whisper chunk timeout (live calls must be fast) ─────────────────────────
-const WHISPER_CHUNK_TIMEOUT_MS = 12000; // 12 s — fail fast for live audio
+const WHISPER_TIMEOUT_MS = 12_000;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Ensure a call entry exists in activeCalls.
- * @param {string} callId
- */
+// ─── State helpers ────────────────────────────────────────────────────────────
 function initCall(callId) {
   if (!activeCalls.has(callId)) {
     activeCalls.set(callId, {
       transcript:          '',
       chunkCount:          0,
       lastAnalyzedLength:  0,
-      audioBufferArray:    [], // Store accumulated chunks
+      verificationStage:   VERIFICATION_STAGE.UNVERIFIED,
+      verifiedOrder:       null,  // set after DB lookup; used for verification compare
+      conversationHistory: [],    // [{ role: 'customer'|'agent', text }]
     });
+    logger.info('Live call initialised', { callId });
   }
 }
 
-/**
- * Remove a finished call from memory. Call this from the socket
- * handler that handles 'call:stream:end'.
- * @param {string} callId
- */
 function endCall(callId) {
-  if (activeCalls.has(callId)) {
-    activeCalls.delete(callId);
-    logger.info('Live call state cleared', { callId });
-  }
+  activeCalls.delete(callId);
+  logger.info('Live call state cleared', { callId });
 }
 
-/**
- * Transcribe a single audio chunk using the local Whisper server.
- * Writes a temp file, posts it, then always cleans up (even on error).
- * @param {Buffer} audioBuffer
- * @returns {Promise<string>} Transcribed text, or empty string on failure.
- */
-async function transcribeChunkWithWhisper(audioBuffer) {
-  const tempWebm = path.join(os.tmpdir(), `chunk-${uuidv4()}.webm`);
-  const tempWav = path.join(os.tmpdir(), `chunk-${uuidv4()}.wav`);
-
+// ─── Whisper transcription ────────────────────────────────────────────────────
+async function transcribeChunk(audioBuffer) {
+  const tempFile = path.join(os.tmpdir(), `chunk-${uuidv4()}.webm`);
   try {
-    fs.writeFileSync(tempWebm, audioBuffer);
-
-    // Convert webm to 16kHz mono WAV (required by whisper.cpp)
-    await execPromise(`"${ffmpegStatic}" -i "${tempWebm}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWav}" -y`);
-
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(tempWav), {
-      filename:    'chunk.wav',
-      contentType: 'audio/wav',
+    fs.writeFileSync(tempFile, audioBuffer);
+    const form = new FormData();
+    form.append('file', fs.createReadStream(tempFile), {
+      filename:    'chunk.webm',
+      contentType: 'audio/webm',
     });
-    formData.append('response_format', 'json');
+    form.append('response_format', 'json');
 
-    const response = await axios.post(
-      `${config.whisper.url}/inference`,
-      formData,
-      {
-        headers: formData.getHeaders(),
-        timeout: WHISPER_CHUNK_TIMEOUT_MS,
-      }
-    );
-
-    return response.data?.text?.trim() ?? '';
-
+    const res = await axios.post(`${config.whisper.url}/inference`, form, {
+      headers: form.getHeaders(),
+      timeout: WHISPER_TIMEOUT_MS,
+    });
+    return res.data?.text?.trim() ?? '';
   } catch (err) {
-    logger.error('Live chunk Whisper transcription failed', { error: err.message });
+    logger.error('Whisper chunk transcription failed', { error: err.message });
     return '';
   } finally {
-    // Always remove temp files — even if axios, write, or ffmpeg threw
-    try { fs.unlinkSync(tempWebm); } catch { /* already gone */ }
-    try { fs.unlinkSync(tempWav); } catch { /* already gone */ }
+    try { fs.unlinkSync(tempFile); } catch { /* already cleaned up */ }
+  }
+}
+
+// ─── DB lookup ────────────────────────────────────────────────────────────────
+/**
+ * Regex pre-extraction — fast, no LLM needed.
+ * Pulls order ID / email / phone directly from transcript text.
+ * Names are too ambiguous for regex; the LLM handles those.
+ */
+function extractClaimsQuick(transcript) {
+  return {
+    claimedOrderId: (transcript.match(/ORD-\d{4}-\d{5}/i) ?? [])[0] ?? null,
+    claimedEmail:   (transcript.match(/[\w.+-]+@[\w-]+\.\w+/) ?? [])[0] ?? null,
+    claimedPhone:   (transcript.match(/0\d{2}[-\s]?\d{3}[-\s]?\d{4}/) ?? [])[0] ?? null,
+    claimedName:    null,
+  };
+}
+
+async function lookupOrderFromClaims(claims) {
+  try {
+    const { claimedOrderId, claimedEmail, claimedPhone } = claims;
+    const orClauses = [];
+    if (claimedOrderId) orClauses.push({ orderId: claimedOrderId });
+    if (claimedEmail)   orClauses.push({ 'customer.email': claimedEmail });
+    if (claimedPhone)   orClauses.push({ 'customer.phone': claimedPhone });
+    if (!orClauses.length) return null;
+    return await Order.findOne({ $or: orClauses }).lean();
+  } catch (err) {
+    logger.warn('Order lookup failed', { error: err.message });
+    return null;
   }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-
-/**
- * Process one incoming audio chunk for a live call.
- *
- * @param {string}          callId      - Unique call identifier
- * @param {Buffer|ArrayBuffer} audioBuffer - Raw audio data from the socket
- * @param {import('socket.io').Server} io - Socket.IO server instance
- */
 async function processLiveChunk(callId, audioBuffer, io) {
   initCall(callId);
   const state = activeCalls.get(callId);
   state.chunkCount++;
 
-  // Normalise to Node Buffer regardless of what the socket delivers
-  const buf = Buffer.isBuffer(audioBuffer)
-    ? audioBuffer
-    : Buffer.from(audioBuffer);
+  // Normalise buffer type
+  const buf = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
 
-  // Accumulate the audio chunks so ffmpeg has the WebM header from the first chunk
-  state.audioBufferArray.push(buf);
-
-  // ── Transcription ──────────────────────────────────────────────────────────
-
+  // ── 1. Transcribe audio chunk ──────────────────────────────────────────────
+  let newText = '';
   if (config.useMockAws) {
-    // Deterministic mock: cycle through MOCK_SENTENCES
-    const newText = MOCK_SENTENCES[(state.chunkCount - 1) % MOCK_SENTENCES.length] + ' ';
-    await new Promise(r => setTimeout(r, 500)); // simulate latency
-    state.transcript += newText;
+    newText = MOCK_SENTENCES[(state.chunkCount - 1) % MOCK_SENTENCES.length] + ' ';
+    await new Promise(r => setTimeout(r, 400));
   } else {
-    const combinedBuffer = Buffer.concat(state.audioBufferArray);
-    const whisperText = await transcribeChunkWithWhisper(combinedBuffer);
-    
-    if (whisperText) {
-      // Overwrite transcript instead of appending because Whisper re-transcribes the whole accumulated audio
-      state.transcript = whisperText;
+    const text = await transcribeChunk(buf);
+    newText = text ? text + ' ' : '';
+  }
+
+  if (!newText.trim()) return; // nothing transcribed — skip
+
+  state.transcript += newText;
+  state.conversationHistory.push({ role: 'customer', text: newText.trim() });
+
+  // Emit live transcript immediately
+  io.to(callId).emit('call:stream:transcript', { callId, text: state.transcript });
+
+  // ── 2. Throttle: only run AI pipeline when transcript grows enough ─────────
+  const transcriptGrew = state.transcript.length > state.lastAnalyzedLength + 40;
+  if (!transcriptGrew) return;
+  state.lastAnalyzedLength = state.transcript.length;
+
+  try {
+    // ── 3. Pre-fetch order from DB (if not yet found) ────────────────────────
+    if (!state.verifiedOrder) {
+      const claims = extractClaimsQuick(state.transcript);
+      const hasAnyClaim = Object.values(claims).some(v => v !== null);
+      if (hasAnyClaim) {
+        const order = await lookupOrderFromClaims(claims);
+        if (order) {
+          state.verifiedOrder = order;
+          logger.info('Order pre-fetched for verification', { callId, orderId: order.orderId });
+        }
+      }
     }
-  }
 
-  if (!state.transcript.trim()) {
-    // Nothing new to work with — skip emit and analysis
-    return;
-  }
+    // ── 4. Run verification-aware Ollama pipeline ────────────────────────────
+    const result = await runAgentPromptPipeline({
+      transcript:          state.transcript,
+      verificationStage:   state.verificationStage,
+      orderOnFile:         state.verifiedOrder,
+      conversationHistory: state.conversationHistory,
+      ollamaUrl:           config.ollama.url,
+      ollamaModel:         config.ollama.model,
+    });
 
-  // Emit updated transcript to THIS call's room only (not all sockets)
-  io.to(callId).emit('call:stream:transcript', {
-    callId,
-    text: state.transcript,
-  });
-
-  // ── AI Analysis (throttled by content growth) ──────────────────────────────
-  const transcriptGrewEnough = state.transcript.length > state.lastAnalyzedLength + 50;
-
-  if (transcriptGrewEnough) {
-    state.lastAnalyzedLength = state.transcript.length;
-
-    try {
-      // 1. Ollama intent/sentiment analysis
-      const aiResult = await analyzeTranscript(state.transcript);
-      io.to(callId).emit('call:stream:analysis', { callId, ...aiResult });
-
-      // 2. Governance rule evaluation
-      const govResult = evaluateGovernance(aiResult, state.transcript);
-      if (govResult.flags?.length > 0) {
-        govResult.flags.forEach(flag => {
-          io.to(callId).emit('call:stream:flag', { callId, flag });
+    // ── 5. Persist updated verification stage ────────────────────────────────
+    if (result.verificationStage) {
+      const prev = state.verificationStage;
+      state.verificationStage = result.verificationStage;
+      if (prev !== result.verificationStage) {
+        logger.info('Verification stage changed', {
+          callId,
+          from: prev,
+          to:   result.verificationStage,
         });
       }
-    } catch (err) {
-      logger.error('Live AI analysis failed', { callId, error: err.message });
     }
+
+    // ── 5.5 DB Call Logging (Mandatory) ──────────────────────────────────────
+    try {
+      const logEntry = new CallLog({
+        call_id: callId,
+        timestamp: new Date(),
+        user_input: state.transcript,
+        system_processed_input: result.extracted?.cleaned_input || '',
+        intent: result.extracted?.intent || '',
+        entities: {
+          order_id: result.extracted?.entities?.order_id || '',
+          email: result.extracted?.entities?.email || '',
+          phone: result.extracted?.entities?.phone || '',
+          name: result.extracted?.entities?.name || '',
+        },
+        agent_stage: state.verificationStage,
+        status: state.verificationStage === VERIFICATION_STAGE.VERIFIED ? 'verified' : 'pending',
+        notes: result.summary || result.agentScript || ''
+      });
+      await logEntry.save();
+      logger.info('Call interaction logged to DB', { callId });
+    } catch (dbErr) {
+      logger.error('Failed to save CallLog', { callId, error: dbErr.message });
+    }
+
+    // ── 6. Emit agent assist result to frontend ───────────────────────────────
+    io.to(callId).emit('call:stream:agent_assist', {
+      callId,
+      // Core
+      type:              result.type,
+      verificationStage: result.verificationStage,
+      agentScript:       result.agentScript,
+      // Verification fields (null when VERIFIED)
+      verificationResult: result.verificationResult ?? null,
+      matchedFields:      result.matchedFields      ?? null,
+      mismatchedFields:   result.mismatchedFields   ?? null,
+      nextStep:           result.nextStep            ?? null,
+      confidenceScore:    result.confidenceScore     ?? null,
+      // Post-verification fields (null before VERIFIED)
+      intent:             result.intent             ?? null,
+      sentiment:          result.sentiment          ?? null,
+      confidence:         result.confidence         ?? null,
+      summary:            result.summary            ?? null,
+      agentAction:        result.agentAction        ?? null,
+      actionPayload:      result.actionPayload      ?? null,
+      flags:              result.flags              ?? [],
+      governance:         result.governance         ?? null,
+    });
+
+    // ── 7. Feed existing Real-time Analysis panel when verified ───────────────
+    if (result.type === 'AGENT_ASSIST') {
+      io.to(callId).emit('call:stream:analysis', {
+        callId,
+        intent:     result.intent,
+        sentiment:  result.sentiment,
+        confidence: result.confidence,
+      });
+    }
+
+    // ── 8. Governance rule engine ─────────────────────────────────────────────
+    const govResult = evaluateGovernance(result, state.transcript);
+    govResult.flags?.forEach(flag => {
+      io.to(callId).emit('call:stream:flag', { callId, flag });
+    });
+
+    // Surface verification failure as a governance flag
+    if (result.verificationStage === VERIFICATION_STAGE.FAILED) {
+      io.to(callId).emit('call:stream:flag', { callId, flag: 'VERIFICATION_FAILED' });
+    }
+
+  } catch (err) {
+    logger.error('Agent prompt pipeline error', { callId, error: err.message });
+    io.to(callId).emit('call:stream:error', {
+      callId,
+      source:  'agent_assist',
+      message: 'Agent assist temporarily unavailable.',
+    });
   }
 }
 

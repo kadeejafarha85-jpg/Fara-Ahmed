@@ -1,107 +1,19 @@
 // src/services/ollamaService.js
-// Sends transcripts to a local Ollama instance for:
-//   • Intent detection
-//   • Entity extraction
-//   • Summarization
-// Returns structured JSON matching a strict schema.
-// Mock mode returns realistic deterministic output.
-
 const axios   = require('axios');
 const config  = require('../config');
 const logger  = require('../utils/logger');
 const { withRetry } = require('../utils/retry');
 
-// ─── Prompt engineering ──────────────────────────────────────
-/**
- * Build the system + user prompt sent to Ollama.
- * The model is instructed to return ONLY valid JSON — no commentary.
- */
-function buildPrompt(transcript) {
-  const systemPrompt = `You are a call-centre AI analyst for a delivery and e-commerce company.
-Your job is to extract structured data from customer call transcripts.
-
-You MUST return ONLY valid JSON. Your response must be a single JSON object matching this exact schema:
-{
-  "intent": "<one of: CHANGE_ADDRESS | REFUND_REQUEST | DELIVERY_ENQUIRY | CANCELLATION | COMPLAINT | PRODUCT_QUERY | COMPLIMENT | OTHER>",
-  "entities": {
-    "order_id":   "<string or null>",
-    "new_address":"<string or null>",
-    "phone":      "<string or null>",
-    "email":      "<string or null>",
-    "customer_name":"<string or null>",
-    "amount":     "<string or null>"
-  },
-  "summary":     "<2-3 sentence summary of the call>",
-  "confidence":  <integer 0-100>,
-  "sentiment":   "<POSITIVE | NEUTRAL | NEGATIVE>",
-  "urgency":     "<LOW | MEDIUM | HIGH>"
-}`;
-
-  const userPrompt = `Analyse this customer call transcript:\n\n"${transcript}"\n\nReturn ONLY the JSON object.`;
-
-  return { systemPrompt, userPrompt };
-}
-
-// ─── Mock implementation ─────────────────────────────────────
-/**
- * Deterministic mock: maps known keywords to realistic output.
- */
-async function mockAnalyze(transcript) {
-  logger.debug('[MOCK Ollama] Simulating NLP analysis');
-  await new Promise(r => setTimeout(r, 600));
-
-  const t = transcript.toLowerCase();
-
-  let intent     = 'OTHER';
-  let confidence = 75;
-  let sentiment  = 'NEUTRAL';
-  let urgency    = 'MEDIUM';
-  let entities   = { order_id: null, new_address: null, phone: null, email: null, customer_name: null, amount: null };
-
-  // Intent detection
-  if (t.includes('address') || t.includes('change') || t.includes('update')) {
-    intent = 'CHANGE_ADDRESS'; confidence = 87; sentiment = 'NEUTRAL';
-  } else if (t.includes('refund') || t.includes('money back') || t.includes('charge')) {
-    intent = 'REFUND_REQUEST'; confidence = 82; sentiment = 'NEGATIVE'; urgency = 'HIGH';
-  } else if (t.includes('status') || t.includes('where') || t.includes('tracking') || t.includes('arrived')) {
-    intent = 'DELIVERY_ENQUIRY'; confidence = 91; sentiment = 'NEUTRAL';
-  } else if (t.includes('cancel') || t.includes('subscription')) {
-    intent = 'CANCELLATION'; confidence = 69; sentiment = 'NEGATIVE';
-  } else if (t.includes('ridiculous') || t.includes('garbage') || t.includes('sue') || t.includes('unacceptable')) {
-    intent = 'COMPLAINT'; confidence = 95; sentiment = 'NEGATIVE'; urgency = 'HIGH';
+async function queryOllama(systemPrompt, userPrompt, jsonFormat = true) {
+  if (config.useMockOllama) {
+     return null; // Mock is handled inside each function wrapper directly
   }
-
-  // Entity extraction (regex)
-  const orderMatch   = transcript.match(/order\s(?:number\s)?(\d{4,6})/i);
-  const phoneMatch   = transcript.match(/(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\+\d{1,3}\s?\d{3,})/);
-  const emailMatch   = transcript.match(/[\w.-]+@[\w.-]+\.\w+/i);
-  const addrMatch    = transcript.match(/\d+\s[\w\s,]+(?:road|street|avenue|tower|marina|jumeirah|dubai)[^,.]*/i);
-  const amountMatch  = transcript.match(/\$[\d,]+|\d+\s?(?:dollars|AED|usd)/i);
-
-  if (orderMatch)  entities.order_id    = orderMatch[1];
-  if (phoneMatch)  entities.phone       = phoneMatch[0];
-  if (emailMatch)  entities.email       = emailMatch[0];
-  if (addrMatch)   entities.new_address = addrMatch[0].trim();
-  if (amountMatch) entities.amount      = amountMatch[0];
-
-  const summary = `Customer called regarding ${intent.replace('_', ' ').toLowerCase()}. `
-    + (entities.order_id ? `Referenced order #${entities.order_id}. ` : '')
-    + `Sentiment is ${sentiment.toLowerCase()} with ${urgency.toLowerCase()} urgency.`;
-
-  return { intent, entities, summary, confidence, sentiment, urgency };
-}
-
-// ─── Real Ollama invocation ──────────────────────────────────
-async function realAnalyze(transcript) {
-  const { systemPrompt, userPrompt } = buildPrompt(transcript);
   
   const payload = {
     model: config.ollama.model,
-    format: 'json',
+    format: jsonFormat ? 'json' : undefined,
     stream: false,
-    options: {
-      temperature: 0.1, // low temp for deterministic structured output
-    },
+    options: { temperature: 0.1 },
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
@@ -109,48 +21,115 @@ async function realAnalyze(transcript) {
   };
 
   const endpoint = `${config.ollama.url}/api/chat`;
-
+  
   const response = await withRetry(
-    () => axios.post(endpoint, payload, { timeout: 60000 }), // 60s timeout for local inference
+    () => axios.post(endpoint, payload, { timeout: 60000 }),
     config.retry.maxRetries,
     config.retry.delayMs,
     'Ollama Chat API'
   );
 
-  const text = response.data?.message?.content || '';
-
+  let text = response.data?.message?.content || '';
   logger.debug('Ollama raw response', { length: text.length });
 
-  // Parse the JSON the model returned
-  try {
-    const parsed = JSON.parse(text.trim());
-    return parsed;
-  } catch {
-    // Try to extract JSON if model wrapped it in markdown or prose
-    const jsonMatch = text.match(/\{[\s\S]+\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    throw new Error('Ollama returned non-JSON response: ' + text.slice(0, 200));
+  if (jsonFormat) {
+    try {
+      return JSON.parse(text.trim());
+    } catch {
+      const match = text.match(/\{[\s\S]+\}/);
+      if (match) return JSON.parse(match[0]);
+      return {}; 
+    }
   }
+  return text;
 }
 
-/**
- * Analyse a transcript using Ollama (real) or mock.
- * @param {string} transcript
- * @returns {Promise<{intent, entities, summary, confidence, sentiment, urgency}>}
- */
-async function analyzeTranscript(transcript) {
-  if (!transcript || transcript.trim().length < 10) {
-    return { intent: 'UNKNOWN', entities: {}, summary: 'No transcript provided.', confidence: 0, sentiment: 'NEUTRAL', urgency: 'LOW' };
+async function extractClaims(transcript) {
+  if (config.useMockOllama) {
+    await new Promise(r => setTimeout(r, 400));
+    const t = transcript.toLowerCase();
+    return {
+      claimed_name: t.includes('james') || t.includes('sarah') || t.includes('lisa') || t.includes('robert') ? 'Customer' : null,
+      claimed_intent: t.includes('refund') ? 'REFUND_REQUEST' : (t.includes('cancel') ? 'CANCELLATION' : 'DELIVERY_ENQUIRY')
+    };
   }
 
-  if (config.useMockOllama) return mockAnalyze(transcript);
-
-  try {
-    return await realAnalyze(transcript);
-  } catch (err) {
-    logger.error('Ollama analysis failed', { error: err.message });
-    throw err;
-  }
+  const system = `You extract claimed details. ONLY output JSON matching exact schema: 
+  {
+    "claimed_name": "<string or null, any names heard>",
+    "claimed_intent": "<string or null>"
+  }`;
+  const user = `Transcript:\n"${transcript}"`;
+  return await queryOllama(system, user, true) || {};
 }
 
-module.exports = { analyzeTranscript };
+async function verifyClaims(extracted, orderData) {
+  if (config.useMockOllama) {
+    await new Promise(r => setTimeout(r, 400));
+    const orderFound = !!orderData;
+    const nameFound = !!extracted?.claimed_name;
+    const isVerified = orderFound && nameFound; // Quick mock strategy
+    return {
+      is_verified: isVerified,
+      verification_checklist: {
+        "Order ID Located": orderFound,
+        "Name Matches Account": nameFound
+      },
+      agent_script: isVerified 
+          ? "Thank you for verifying your details. Let's look into your issue."
+          : (orderFound ? "Could I ask you to confirm your first and last name please?" : "Welcome to GovAI Delivery! Could you please provide your Order ID?")
+    };
+  }
+
+  const system = `You are a verification AI. Compare claimed details vs database. ONLY output JSON matching exact schema:
+  {
+    "is_verified": <boolean true/false>,
+    "verification_checklist": { "<check item>": <boolean> },
+    "agent_script": "<what to instruct the agent to ask next to obtain verification, or a thank you if verified>"
+  }`;
+  const user = `CLAIMED:\n${JSON.stringify(extracted||{})}\n\nDATABASE:\n${JSON.stringify(orderData||{})}\n\nDetermine if verified based on matching data.`;
+  return await queryOllama(system, user, true) || { is_verified: false, verification_checklist: {} };
+}
+
+async function assistAgent(transcript, orderData) {
+  if (config.useMockOllama) {
+    await new Promise(r => setTimeout(r, 400));
+    const t = transcript.toLowerCase();
+    
+    let intent = 'INQUIRY';
+    let sentiment = 'NEUTRAL';
+    let action = 'PROVIDE_INFO';
+    let script = "Let me pull that up for you right away.";
+    let flags = [];
+    
+    if (t.includes('refund')) {
+       intent = 'REFUND_REQUEST'; sentiment = 'NEGATIVE'; action = 'ISSUE_REFUND'; 
+       script = "I see your order. Let me process this refund right now.";
+       flags = ['HIGH_URGENCY'];
+    }
+    else if (t.includes('cancel')) {
+       intent = 'CANCELLATION'; action = 'OFFER_RETENTION';
+       script = "Before you cancel, I'd love to offer 20% off.";
+    }
+    
+    return {
+      intent, sentiment, confidence: 92, summary: "Customer discussing " + intent,
+      flags, agentScript: script, agentAction: action
+    };
+  }
+
+  const system = `You provide final resolutions for verified users. ONLY output JSON matching exact schema:
+  {
+    "intent": "REFUND_REQUEST|DELIVERY_ENQUIRY|CANCELLATION|COMPLAINT|INQUIRY|NONE",
+    "sentiment": "POSITIVE|NEUTRAL|NEGATIVE|VERY_NEGATIVE",
+    "summary": "<1-2 sentences>",
+    "flags": ["PROFANITY","HIGH_URGENCY","ESCALATION_NEEDED","LEGAL_THREAT","POLICY_VIOLATION"],
+    "confidence": <integer 0-100>,
+    "agentScript": "suggested string to say to user",
+    "agentAction": "ISSUE_REFUND|OFFER_RETENTION|ESCALATE|EMPATHIZE|PROVIDE_INFO|NONE"
+  }`;
+  const user = `Transcript: "${transcript}"\nOrder Data: ${JSON.stringify(orderData||{})}`;
+  return await queryOllama(system, user, true) || { intent: "NONE", sentiment: "NEUTRAL", agentAction: "NONE", confidence: 0 };
+}
+
+module.exports = { extractClaims, verifyClaims, assistAgent };
