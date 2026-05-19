@@ -1,15 +1,32 @@
 // src/services/transcribeService.js
-// Submits audio to a local Whisper server for transcription.
+// Submits audio to AWS Transcribe for speech-to-text.
 // In mock mode returns realistic sample transcripts immediately.
 
 const { v4: uuidv4 } = require('uuid');
-const axios   = require('axios');
-const config  = require('../config');
-const logger  = require('../utils/logger');
-const { downloadAudio } = require('./s3Service');
+const axios = require('axios');
+const {
+  TranscribeClient,
+  StartTranscriptionJobCommand,
+  GetTranscriptionJobCommand,
+} = require('@aws-sdk/client-transcribe');
+const config = require('../config');
+const logger = require('../utils/logger');
 const { withRetry } = require('../utils/retry');
 
-// ─── Mock transcripts pool ──────────────────────────────────
+let transcribeClient = null;
+
+function getClient() {
+  if (!transcribeClient) {
+    transcribeClient = new TranscribeClient({
+      region: config.aws.region,
+      credentials: config.aws.accessKeyId
+        ? { accessKeyId: config.aws.accessKeyId, secretAccessKey: config.aws.secretAccessKey }
+        : undefined,
+    });
+  }
+  return transcribeClient;
+}
+
 const MOCK_TRANSCRIPTS = [
   {
     text: "Hello, I need to change the delivery address for my order number 88234. The new address is 45 Marina Tower, Dubai Marina, Dubai. My phone number is 050-123-4567. Please update it as soon as possible.",
@@ -38,80 +55,90 @@ const MOCK_TRANSCRIPTS = [
   },
 ];
 
-// ─── Mock implementation ─────────────────────────────────────
 async function mockTranscribe(audioKey) {
-  logger.debug('[MOCK Whisper] Simulating transcription', { audioKey });
-  await new Promise(r => setTimeout(r, 800)); // simulate processing time
+  logger.debug('[MOCK AWS Transcribe] Simulating transcription', { audioKey });
+  await new Promise(resolve => setTimeout(resolve, 800));
 
-  // Pick a transcript deterministically based on the audio key
-  const idx = Math.abs(audioKey.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % MOCK_TRANSCRIPTS.length;
+  const idx = Math.abs(audioKey.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % MOCK_TRANSCRIPTS.length;
   const sample = MOCK_TRANSCRIPTS[idx];
 
   return {
     transcript: sample.text,
     confidence: sample.confidence,
-    language:   'en',
-    job_name:   `mock-job-${uuidv4().slice(0, 8)}`,
-    mock:       true,
+    language: config.aws.transcribeLanguageCode,
+    job_name: `mock-transcribe-${uuidv4().slice(0, 8)}`,
+    mock: true,
   };
 }
 
-// ─── Real implementation (Whisper API) ───────────────────────
+function mediaFormatFromKey(audioKey) {
+  const ext = audioKey.split('.').pop()?.toLowerCase();
+  if (['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm'].includes(ext)) return ext;
+  if (ext === 'm4a') return 'mp4';
+  return 'wav';
+}
 
-/**
- * Transcribe an audio file using a local Whisper server.
- * Expects a whisper.cpp server running at WHISPER_URL (default http://localhost:8080)
- * @param {string} audioKey  - S3 object key
- * @param {string} callId    - Used as part of the job name
- */
+async function pollJob(client, jobName, maxAttempts = 60, delayMs = 5000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await client.send(new GetTranscriptionJobCommand({ TranscriptionJobName: jobName }));
+    const job = response.TranscriptionJob;
+    const status = job?.TranscriptionJobStatus;
+
+    if (status === 'COMPLETED') {
+      const transcriptUri = job.Transcript?.TranscriptFileUri;
+      if (!transcriptUri) throw new Error('AWS Transcribe completed without a transcript URI.');
+
+      const transcriptResponse = await axios.get(transcriptUri, { timeout: 30000 });
+      const results = transcriptResponse.data?.results;
+      const transcript = results?.transcripts?.map(item => item.transcript).join(' ').trim() || '';
+      const confidences = (results?.items || [])
+        .map(item => Number(item.alternatives?.[0]?.confidence))
+        .filter(Number.isFinite);
+      const confidence = confidences.length
+        ? Math.round((confidences.reduce((sum, value) => sum + value, 0) / confidences.length) * 100)
+        : 90;
+
+      return {
+        transcript,
+        confidence,
+        language: job.LanguageCode || config.aws.transcribeLanguageCode,
+        job_name: jobName,
+      };
+    }
+
+    if (status === 'FAILED') {
+      throw new Error(job?.FailureReason || 'AWS Transcribe job failed.');
+    }
+
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  throw new Error(`AWS Transcribe job timed out: ${jobName}`);
+}
+
 async function transcribeAudio(audioKey, callId) {
   if (config.useMockAws) return mockTranscribe(audioKey);
 
-  logger.info('Starting local Whisper transcription', { audioKey });
+  logger.info('Starting AWS Transcribe job', { audioKey });
 
-  // 1. Download the file buffer from S3 (or local storage if customized)
-  const buffer = await downloadAudio(audioKey);
-  
-  // 2. Prepare the multipart form data for Whisper
-  // The whisper.cpp server expects the file under the 'file' key.
-  // Using FormData is possible if polyfilled, but we can also use axios built-in form serialization if supported.
-  // Since we are in Node, we can use Blob or just construct a multipart request manually if needed.
-  // Since axios >= 1.x supports posting form data easily with objects containing Buffers, we can try this:
-  
-  const formData = new FormData();
-  // We need to convert Buffer to Blob for FormData in Node 18+
-  const blob = new Blob([buffer], { type: audioKey.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav' });
-  formData.append('file', blob, audioKey.split('/').pop());
-  formData.append('response_format', 'json');
-  formData.append('temperature', '0.0'); // deterministic transcription
+  const client = getClient();
+  const jobName = `govai-${callId}-${uuidv4().slice(0, 8)}`.replace(/[^0-9a-zA-Z._-]/g, '-');
+  const mediaUri = `s3://${config.aws.s3Bucket}/${audioKey}`;
 
-  const endpoint = `${config.whisper.url}/inference`;
-
-  const response = await withRetry(
-    () => axios.post(endpoint, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000 // 5 minute timeout for long audio on local hardware
-    }),
+  await withRetry(
+    () => client.send(new StartTranscriptionJobCommand({
+      TranscriptionJobName: jobName,
+      LanguageCode: config.aws.transcribeLanguageCode,
+      MediaFormat: mediaFormatFromKey(audioKey),
+      Media: { MediaFileUri: mediaUri },
+      OutputBucketName: config.aws.transcribeOutputBucket || config.aws.s3Bucket,
+    })),
     config.retry.maxRetries,
     config.retry.delayMs,
-    'Whisper Inference API'
+    'AWS Transcribe StartTranscriptionJob'
   );
 
-  const data = response.data;
-  
-  // whisper.cpp /inference returns { text: "..." }
-  if (!data || !data.text) {
-    throw new Error('Whisper returned invalid response format.');
-  }
-
-  // Whisper.cpp HTTP server doesn't output confidence natively in simple JSON mode, 
-  // so we'll mock a high confidence value if it succeeded.
-  return { 
-    transcript: data.text.trim(), 
-    confidence: 90, 
-    language:   'en', 
-    job_name:   `local-whisper-${callId}` 
-  };
+  return pollJob(client, jobName);
 }
 
 module.exports = { transcribeAudio };

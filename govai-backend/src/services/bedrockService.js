@@ -109,44 +109,49 @@ async function mockAnalyze(transcript) {
 // ─── Real Bedrock invocation ──────────────────────────────────
 async function realAnalyze(transcript) {
   const { systemPrompt, userPrompt } = buildPrompt(transcript);
+  return invokeBedrockJson({ systemPrompt, userPrompt, maxTokens: 512 });
+}
+
+async function invokeBedrockJson({
+  systemPrompt,
+  userPrompt,
+  maxTokens = 800,
+  temperature = 0.1,
+  operation = 'Bedrock InvokeModel',
+}) {
   const client = getClient();
 
-  // Bedrock Claude Messages API body
   const requestBody = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens:         512,
-    temperature:        0.1, // low temp for deterministic structured output
-    system:             systemPrompt,
+    max_tokens: maxTokens,
+    temperature,
+    system: systemPrompt,
     messages: [
-      { role: 'user', content: userPrompt }
+      { role: 'user', content: userPrompt },
     ],
   };
 
   const response = await withRetry(
     () => client.send(new InvokeModelCommand({
-      modelId:     config.aws.bedrockModelId,
+      modelId: config.aws.bedrockModelId,
       contentType: 'application/json',
-      accept:      'application/json',
-      body:        JSON.stringify(requestBody),
+      accept: 'application/json',
+      body: JSON.stringify(requestBody),
     })),
     config.retry.maxRetries,
     config.retry.delayMs,
-    'Bedrock InvokeModel'
+    operation
   );
 
-  // Decode response
-  const raw  = Buffer.from(response.body).toString('utf-8');
+  const raw = Buffer.from(response.body).toString('utf-8');
   const body = JSON.parse(raw);
   const text = body.content?.[0]?.text || '';
 
-  logger.debug('Bedrock raw response', { length: text.length });
+  logger.debug('Bedrock raw response', { operation, length: text.length });
 
-  // Parse the JSON the model returned
   try {
-    const parsed = JSON.parse(text.trim());
-    return parsed;
+    return JSON.parse(text.trim());
   } catch {
-    // Try to extract JSON if model wrapped it in backticks
     const jsonMatch = text.match(/\{[\s\S]+\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
     throw new Error('Bedrock returned non-JSON response: ' + text.slice(0, 200));
@@ -173,4 +178,4 @@ async function analyzeTranscript(transcript) {
   }
 }
 
-module.exports = { analyzeTranscript };
+module.exports = { analyzeTranscript, invokeBedrockJson };

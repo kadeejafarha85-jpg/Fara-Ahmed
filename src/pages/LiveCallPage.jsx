@@ -48,7 +48,10 @@ export default function LiveCallPage() {
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
   const recognitionRef = useRef(null);
+  const chunkSendChainRef = useRef(Promise.resolve());
   const liveTranscript = useRef(''); // always current, no closure staleness
+  const lastSentTranscriptRef = useRef('');
+  const backendAudioStartedRef = useRef(false);
 
   // ── Socket listeners ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -64,6 +67,7 @@ export default function LiveCallPage() {
 
     socketService.socket.on('call:stream:agent_assist', (data) => {
       setAssistData(data);
+      setIsAnalyzing(false);
     });
 
     socketService.socket.on('call:stream:analysis', (data) => {
@@ -74,27 +78,24 @@ export default function LiveCallPage() {
       setFlags(prev => [...new Set([...prev, flag])])
     );
 
+    socketService.socket.on('call:stream:error', () => {
+      setIsAnalyzing(false);
+    });
+
     return () => {
       socketService.socket.off('call:stream:transcript');
       socketService.socket.off('call:stream:agent_assist');
       socketService.socket.off('call:stream:analysis');
       socketService.socket.off('call:stream:flag');
+      socketService.socket.off('call:stream:error');
     };
   }, []);
 
   // ── Start call ─────────────────────────────────────────────────────────────
-  const startCall = async () => {
-    // Reset all content state first
-    setTranscript('');
-    setFlags([]);
-    setAssistData(null);
-    setLiveAnalysis(null);
-    liveTranscript.current = '';
+  const startBackendAudioStream = async (activeCallId) => {
+    if (backendAudioStartedRef.current) return;
+    backendAudioStartedRef.current = true;
 
-    const newCallId = `LIVE-${Date.now()}`;
-    setCallId(newCallId);
-
-    // 1. MediaRecorder → socket → backend Whisper pipeline
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -102,25 +103,59 @@ export default function LiveCallPage() {
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
-      recorder.ondataavailable = async ({ data }) => {
-        if (data.size > 0)
-          socketService.socket.emit('call:stream:audio', {
-            callId: newCallId,
-            audioChunk: await data.arrayBuffer(),
-            mimeType: recorder.mimeType,
-          });
-      };
-      // Emit end after final chunk — prevents race condition
-      recorder.onstop = () => socketService.socket.emit('call:stream:end', { callId: newCallId });
+      recorder.ondataavailable = ({ data }) => {
+        if (data.size > 0) {
+          chunkSendChainRef.current = chunkSendChainRef.current.catch(() => {}).then(async () => {
+            const audioChunk = await data.arrayBuffer();
+            if (!socketService.socket?.connected) return;
 
-      socketService.socket.emit('call:stream:start', { callId: newCallId });
+            socketService.socket.emit('call:stream:audio', {
+              callId: activeCallId,
+              audioChunk,
+              mimeType: recorder.mimeType,
+            });
+          });
+        }
+      };
+
+      recorder.onstop = () => {
+        chunkSendChainRef.current.finally(() => {
+          if (socketService.socket?.connected) {
+            socketService.socket.emit('call:stream:end', { callId: activeCallId });
+          }
+        });
+      };
+
       recorder.start(3000);
     } catch (err) {
+      backendAudioStartedRef.current = false;
       console.error('MediaRecorder failed:', err);
     }
+  };
 
-    // 2. Web Speech API → local transcript fallback
+  const startCall = async () => {
+    // Reset all content state first
+    setTranscript('');
+    setFlags([]);
+    setAssistData(null);
+    setLiveAnalysis(null);
+    setIsAnalyzing(false);
+    chunkSendChainRef.current = Promise.resolve();
+    liveTranscript.current = '';
+    lastSentTranscriptRef.current = '';
+    backendAudioStartedRef.current = false;
+
+    const newCallId = `LIVE-${Date.now()}`;
+    setCallId(newCallId);
     const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+
+    socketService.socket.emit('call:stream:start', { callId: newCallId });
+
+    // 1. Prefer browser transcript input; fall back to backend AWS transcription when unavailable.
+    if (!SR) {
+      await startBackendAudioStream(newCallId);
+    }
+
     if (SR) {
       const rec = new SR();
       rec.continuous = true;
@@ -130,8 +165,25 @@ export default function LiveCallPage() {
         const text = Array.from(event.results).map(r => r[0].transcript).join(' ').trim();
         setTranscript(text);
         liveTranscript.current = text;
+        if (
+          socketService.socket &&
+          text.length >= 12 &&
+          text.length >= lastSentTranscriptRef.current.length + 8
+        ) {
+          lastSentTranscriptRef.current = text;
+          setIsAnalyzing(true);
+          socketService.socket.emit('call:stream:transcript_input', {
+            callId: newCallId,
+            text,
+          });
+        }
       };
-      rec.onerror = (e) => console.warn('SpeechRecognition:', e.error);
+      rec.onerror = (e) => {
+        console.warn('SpeechRecognition:', e.error);
+        if (e.error === 'network' || e.error === 'service-not-allowed') {
+          startBackendAudioStream(newCallId);
+        }
+      };
       rec.start();
       recognitionRef.current = rec;
     }
@@ -141,15 +193,23 @@ export default function LiveCallPage() {
 
   // ── End call ───────────────────────────────────────────────────────────────
   const endCall = () => {
-    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
 
     recognitionRef.current?.stop();
     recognitionRef.current = null;
+    backendAudioStartedRef.current = false;
+
+    if (socketService.socket?.connected && callId) {
+      socketService.socket.emit('call:stream:end', { callId });
+    }
 
     setIsRecording(false);
     setCallId(null);
+    setIsAnalyzing(false);
   };
 
   const handleAction = useCallback((action, intent) => {
@@ -176,7 +236,7 @@ export default function LiveCallPage() {
             <Activity size={18} color={isRecording ? '#ef4444' : 'var(--text-muted)'} />
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-            Voice → Whisper → Server Agent Pipeline → Agent Assist
+            Voice &rarr; AWS Transcribe &rarr; AWS Bedrock &rarr; Agent Assist
           </p>
         </div>
 

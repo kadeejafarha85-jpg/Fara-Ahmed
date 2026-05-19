@@ -13,6 +13,7 @@ const { apiLimiter } = require('./src/middleware/rateLimiter');
 const callsRoutes    = require('./src/routes/calls');
 const deliveryRoutes = require('./src/routes/delivery');
 const healthRoute    = require('./src/routes/health');
+const ticketRoutes   = require('./src/routes/tickets');
 
 const app = express();
 
@@ -42,6 +43,7 @@ if (process.env.NODE_ENV !== 'test') {
 app.use('/health',         healthRoute);
 app.use('/api/calls',      callsRoutes);
 app.use('/api/delivery',   deliveryRoutes);
+app.use('/api/tickets',    ticketRoutes);
 
 // ── API root info ────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -57,6 +59,9 @@ app.get('/', (req, res) => {
       createOrder:     'POST /api/delivery/create',
       updateOrder:     'PUT  /api/delivery/update',
       orders:          'GET  /api/delivery/orders',
+      createTicket:    'POST /api/tickets/create',
+      tickets:         'GET  /api/tickets',
+      updateTicket:    'PUT  /api/tickets/update',
     },
   });
 });

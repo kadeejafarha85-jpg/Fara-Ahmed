@@ -19,6 +19,8 @@ const config = {
     region:          process.env.AWS_REGION            || 'us-east-1',
     s3Bucket:        process.env.S3_BUCKET_NAME        || 'govai-call-audio',
     bedrockModelId:  process.env.BEDROCK_MODEL_ID      || 'anthropic.claude-3-haiku-20240307-v1:0',
+    transcribeLanguageCode: process.env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
+    transcribeOutputBucket: process.env.TRANSCRIBE_OUTPUT_BUCKET || '',
   },
 
   governance: {
@@ -28,10 +30,6 @@ const config = {
   ollama: {
     url:   process.env.OLLAMA_URL || 'http://localhost:11434',
     model: process.env.OLLAMA_MODEL || 'llama3',
-  },
-
-  whisper: {
-    url: process.env.WHISPER_URL || 'http://localhost:8080',
   },
 
   retry: {

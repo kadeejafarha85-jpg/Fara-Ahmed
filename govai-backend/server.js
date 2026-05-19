@@ -50,7 +50,14 @@ async function bootstrap() {
       await processLiveChunk(data.callId, data.audioChunk, io);
     });
 
-    socket.on('call:stream:end', (data) => {
+    socket.on('call:stream:transcript_input', async (data) => {
+      const { processLiveTranscript } = require('./src/services/liveStreamService');
+      await processLiveTranscript(data.callId, data.text, io);
+    });
+
+    socket.on('call:stream:end', async (data) => {
+      const { endCall } = require('./src/services/liveStreamService');
+      await endCall(data.callId);
       logger.info('Live stream ended', { callId: data.callId });
     });
 

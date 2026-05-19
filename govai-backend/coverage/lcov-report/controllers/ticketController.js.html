@@ -3,7 +3,7 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for controllers/deliveryController.js</title>
+    <title>Code coverage report for controllers/ticketController.js</title>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="../prettify.css" />
     <link rel="stylesheet" href="../base.css" />
@@ -19,20 +19,20 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../index.html">All files</a> / <a href="index.html">controllers</a> deliveryController.js</h1>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">controllers</a> ticketController.js</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/39</span>
+                <span class='fraction'>0/44</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/17</span>
+                <span class='fraction'>0/37</span>
             </div>
         
             
@@ -147,37 +147,12 @@
 <a name='L82'></a><a href='#L82'>82</a>
 <a name='L83'></a><a href='#L83'>83</a>
 <a name='L84'></a><a href='#L84'>84</a>
-<a name='L85'></a><a href='#L85'>85</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -186,11 +161,14 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -205,7 +183,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -230,91 +209,115 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// src/controllers/deliveryController.js
-// Handles /api/delivery/* routes.
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">const IssueTicket = <span class="cstat-no" title="statement not covered" >require('../models/IssueTicket');</span>
+const ApiResponse = <span class="cstat-no" title="statement not covered" >require('../utils/apiResponse');</span>
+const logger = <span class="cstat-no" title="statement not covered" >require('../utils/logger');</span>
+const { initiateIssueTicket } = <span class="cstat-no" title="statement not covered" >require('../services/issueTicketService');</span>
 &nbsp;
-const DeliveryOrder       = <span class="cstat-no" title="statement not covered" >require('../models/DeliveryOrder');</span>
-const { updateDeliveryOrder } = <span class="cstat-no" title="statement not covered" >require('../services/deliveryService');</span>
-const ApiResponse         = <span class="cstat-no" title="statement not covered" >require('../utils/apiResponse');</span>
-const logger              = <span class="cstat-no" title="statement not covered" >require('../utils/logger');</span>
-const { v4: uuidv4 }      = <span class="cstat-no" title="statement not covered" >require('uuid');</span>
-&nbsp;
-// ─── POST /api/delivery/create ────────────────────────────────
-async function <span class="fstat-no" title="function not covered" >createOrder(</span>req, res) {
+async function <span class="fstat-no" title="function not covered" >createTicket(</span>req, res) {
 <span class="cstat-no" title="statement not covered" >  try {</span>
-    const {
-      order_id = <span class="branch-0 cbranch-no" title="branch not covered" >`MAN-${uuidv4().slice(0, 8).toUpperCase()}`,</span>
-      call_id, customer_id, intent = <span class="branch-0 cbranch-no" title="branch not covered" >'OTHER',</span>
-      delivery_address, contact_number, notes, items = <span class="branch-0 cbranch-no" title="branch not covered" >[],</span>
-    } = <span class="cstat-no" title="statement not covered" >req.body;</span>
-&nbsp;
-    const existing = <span class="cstat-no" title="statement not covered" >await DeliveryOrder.findOne({ order_id });</span>
-<span class="cstat-no" title="statement not covered" >    if (existing) {</span>
-<span class="cstat-no" title="statement not covered" >      return ApiResponse.badRequest(res, `Order ${order_id} already exists. Use PUT /api/delivery/update.`);</span>
-    }
-&nbsp;
-    const order = <span class="cstat-no" title="statement not covered" >await DeliveryOrder.create({</span>
-      order_id, call_id, customer_id, intent,
-      delivery_address, contact_number, notes, items,
-      history: [{ status: 'PENDING', changed_by: 'API', note: 'Manually created' }],
+    const ticket = <span class="cstat-no" title="statement not covered" >await initiateIssueTicket({</span>
+      callId: req.body.call_id,
+      order: req.body.order || null,
+      transcript: req.body.transcript || '',
+      result: {
+        intent: req.body.issue_type || 'OTHER',
+        agentAction: req.body.agent_action || 'ESCALATE',
+        actionPayload: {
+          orderId: req.body.order_id,
+          reason: req.body.summary,
+        },
+        sentiment: req.body.sentiment || 'NEUTRAL',
+        summary: req.body.summary,
+        flags: req.body.flags || [],
+        verificationStage: req.body.verification_stage,
+      },
+      source: 'API',
     });
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    logger.info('DeliveryOrder created', { order_id });</span>
-<span class="cstat-no" title="statement not covered" >    return ApiResponse.created(res, order, 'Delivery order created');</span>
+<span class="cstat-no" title="statement not covered" >    if (!ticket) <span class="cstat-no" title="statement not covered" >return ApiResponse.badRequest(res, 'Ticket was not created because no actionable issue was provided.');</span></span>
+<span class="cstat-no" title="statement not covered" >    return ApiResponse.created(res, ticket, 'Issue ticket created');</span>
   } catch (err) {
-<span class="cstat-no" title="statement not covered" >    logger.error('Create order failed', { error: err.message });</span>
-<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to create order', err);</span>
+<span class="cstat-no" title="statement not covered" >    logger.error('Create issue ticket failed', { error: err.message });</span>
+<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to create issue ticket', err);</span>
   }
 }
 &nbsp;
-// ─── PUT /api/delivery/update ─────────────────────────────────
-async function <span class="fstat-no" title="function not covered" >updateOrder(</span>req, res) {
+async function <span class="fstat-no" title="function not covered" >getTickets(</span>req, res) {
 <span class="cstat-no" title="statement not covered" >  try {</span>
-    const { order_id, status, delivery_address, contact_number, notes, updated_by } = <span class="cstat-no" title="statement not covered" >req.body;</span>
-<span class="cstat-no" title="statement not covered" >    if (!order_id) <span class="cstat-no" title="statement not covered" >return ApiResponse.badRequest(res, 'order_id is required');</span></span>
-&nbsp;
-    const order = <span class="cstat-no" title="statement not covered" >await updateDeliveryOrder(</span>
-      order_id,
-      { status, delivery_address, contact_number, notes },
-      updated_by || 'API'
-    );
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    logger.info('DeliveryOrder updated', { order_id, status });</span>
-<span class="cstat-no" title="statement not covered" >    return ApiResponse.success(res, order, 'Delivery order updated');</span>
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    if (err.message.startsWith('Order not found')) <span class="cstat-no" title="statement not covered" >return ApiResponse.notFound(res, err.message);</span></span>
-<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to update order', err);</span>
-  }
-}
-&nbsp;
-// ─── GET /api/delivery/orders ────────────────────────────────
-async function <span class="fstat-no" title="function not covered" >getOrders(</span>req, res) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const { status, flagged, page = <span class="branch-0 cbranch-no" title="branch not covered" >1,</span> limit = <span class="branch-0 cbranch-no" title="branch not covered" >20 </span>} = <span class="cstat-no" title="statement not covered" >req.query;</span>
+    const { status, priority, order_id, call_id, page = <span class="branch-0 cbranch-no" title="branch not covered" >1,</span> limit = <span class="branch-0 cbranch-no" title="branch not covered" >20 </span>} = <span class="cstat-no" title="statement not covered" >req.query;</span>
     const filter = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >    if (status)  <span class="cstat-no" title="statement not covered" >filter.status  = status;</span></span>
-<span class="cstat-no" title="statement not covered" >    if (flagged) <span class="cstat-no" title="statement not covered" >filter.flagged = flagged === 'true';</span></span>
+<span class="cstat-no" title="statement not covered" >    if (status) <span class="cstat-no" title="statement not covered" >filter.status = status;</span></span>
+<span class="cstat-no" title="statement not covered" >    if (priority) <span class="cstat-no" title="statement not covered" >filter.priority = priority;</span></span>
+<span class="cstat-no" title="statement not covered" >    if (order_id) <span class="cstat-no" title="statement not covered" >filter.order_id = order_id;</span></span>
+<span class="cstat-no" title="statement not covered" >    if (call_id) <span class="cstat-no" title="statement not covered" >filter.call_id = call_id;</span></span>
 &nbsp;
-    const skip  = <span class="cstat-no" title="statement not covered" >(parseInt(page, 10) - 1) * Math.min(parseInt(limit, 10), 100);</span>
-    const lim   = <span class="cstat-no" title="statement not covered" >Math.min(parseInt(limit, 10), 100);</span>
-    const total = <span class="cstat-no" title="statement not covered" >await DeliveryOrder.countDocuments(filter);</span>
-    const orders = <span class="cstat-no" title="statement not covered" >await DeliveryOrder.find(filter)</span>
+    const lim = <span class="cstat-no" title="statement not covered" >Math.min(parseInt(limit, 10), 100);</span>
+    const skip = <span class="cstat-no" title="statement not covered" >(parseInt(page, 10) - 1) * lim;</span>
+    const total = <span class="cstat-no" title="statement not covered" >await IssueTicket.countDocuments(filter);</span>
+    const tickets = <span class="cstat-no" title="statement not covered" >await IssueTicket.find(filter)</span>
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(lim)
-      .select('-history -__v');
+      .select('-__v');
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    return ApiResponse.success(res, {</span>
-      orders,
+      tickets,
       pagination: { page: parseInt(page, 10), limit: lim, total, pages: Math.ceil(total / lim) },
     });
   } catch (err) {
-<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to retrieve orders', err);</span>
+<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to retrieve issue tickets', err);</span>
   }
 }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >module.exports = { createOrder, updateOrder, getOrders };</span>
+async function <span class="fstat-no" title="function not covered" >updateTicket(</span>req, res) {
+<span class="cstat-no" title="statement not covered" >  try {</span>
+    const { ticket_id, status, assigned_agent, note, updated_by = <span class="branch-0 cbranch-no" title="branch not covered" >'API' </span>} = <span class="cstat-no" title="statement not covered" >req.body;</span>
+<span class="cstat-no" title="statement not covered" >    if (!ticket_id) <span class="cstat-no" title="statement not covered" >return ApiResponse.badRequest(res, 'ticket_id is required');</span></span>
+&nbsp;
+    const ticket = <span class="cstat-no" title="statement not covered" >await IssueTicket.findOne({ ticket_id });</span>
+<span class="cstat-no" title="statement not covered" >    if (!ticket) <span class="cstat-no" title="statement not covered" >return ApiResponse.notFound(res, `Ticket not found: ${ticket_id}`);</span></span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    if (status) <span class="cstat-no" title="statement not covered" >ticket.status = status;</span></span>
+<span class="cstat-no" title="statement not covered" >    if (assigned_agent) <span class="cstat-no" title="statement not covered" >ticket.assigned_agent = assigned_agent;</span></span>
+<span class="cstat-no" title="statement not covered" >    ticket.history.push({</span>
+      status: status || ticket.status,
+      changed_by: updated_by,
+      note: note || 'Ticket updated',
+    });
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    await ticket.save();</span>
+<span class="cstat-no" title="statement not covered" >    return ApiResponse.success(res, ticket, 'Issue ticket updated');</span>
+  } catch (err) {
+<span class="cstat-no" title="statement not covered" >    return ApiResponse.error(res, 'Failed to update issue ticket', err);</span>
+  }
+}
+&nbsp;
+<span class="cstat-no" title="statement not covered" >module.exports = { createTicket, getTickets, updateTicket };</span>
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
